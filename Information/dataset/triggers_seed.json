@@ -69,7 +69,7 @@
       "scope": "merchant", "kind": "ipl_match_today", "source": "external",
       "merchant_id": "m_005_pizzajunction_restaurant_delhi", "customer_id": null,
       "payload": { "match": "DC vs MI", "venue": "Arun Jaitley Stadium", "city": "Delhi", "match_time_iso": "2026-04-26T19:30:00+05:30", "is_weeknight": false },
-      "urgency": 3, "suppression_key": "ipl:m_005:2026-04-26", "expires_at": "2026-04-26T23:59:59+05:30"
+      "urgency": 3, "suppression_key": "ipl:m_005:2026-04-26", "expires_at": "2026-06-30T23:59:59+05:30"
     },
     {
       "id": "trg_011_review_theme_late_delivery",
@@ -90,7 +90,7 @@
       "scope": "merchant", "kind": "active_planning_intent", "source": "internal",
       "merchant_id": "m_006_southindiancafe_restaurant_bangalore", "customer_id": null,
       "payload": { "intent_topic": "corporate_bulk_thali_package", "merchant_last_message": "Yes good idea, what would it look like" },
-      "urgency": 4, "suppression_key": "planning:m_006:corp_thali:2026-W17", "expires_at": "2026-04-29T00:00:00Z"
+      "urgency": 4, "suppression_key": "planning:m_006:corp_thali:2026-W17", "expires_at": "2026-06-30T00:00:00Z"
     },
     {
       "id": "trg_014_seasonal_acquisition_dip_powerhouse",
@@ -111,7 +111,7 @@
       "scope": "merchant", "kind": "active_planning_intent", "source": "internal",
       "merchant_id": "m_008_zenyoga_gym_chennai", "customer_id": null,
       "payload": { "intent_topic": "kids_yoga_summer_camp", "merchant_last_message": "Hi I want to add a kids yoga program — what should it look like?" },
-      "urgency": 4, "suppression_key": "planning:m_008:kids_yoga:2026-W17", "expires_at": "2026-04-30T00:00:00Z"
+      "urgency": 4, "suppression_key": "planning:m_008:kids_yoga:2026-W17", "expires_at": "2026-06-30T00:00:00Z"
     },
     {
       "id": "trg_017_kids_yoga_trial_followup_karthik",
@@ -131,8 +131,8 @@
       "id": "trg_019_chronic_refill_grandfather",
       "scope": "customer", "kind": "chronic_refill_due", "source": "internal",
       "merchant_id": "m_009_apollo_pharmacy_jaipur", "customer_id": "c_013_grandfather_for_m009",
-      "payload": { "molecule_list": ["metformin", "atorvastatin", "telmisartan"], "last_refill": "2026-03-26", "stock_runs_out_iso": "2026-04-28T00:00:00+05:30", "delivery_address_saved": true },
-      "urgency": 3, "suppression_key": "refill:c_013_grandfather_for_m009:2026-04", "expires_at": "2026-04-28T00:00:00+05:30"
+      "payload": { "molecule_list": ["metformin", "atorvastatin", "telmisartan"], "last_refill": "2026-03-26", "stock_runs_out_iso": "2026-06-15T00:00:00+05:30", "delivery_address_saved": true },
+      "urgency": 3, "suppression_key": "refill:c_013_grandfather_for_m009:2026-04", "expires_at": "2026-06-30T00:00:00+05:30"
     },
     {
       "id": "trg_020_summer_demand_shift",

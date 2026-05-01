@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from Project.core.composer import Composer
 from Project.core.dedup import hash_body
 from Project.llm.groq_client import GroqClient
 from Project.runtime.reply_engine import ReplyEngine
-from Project.runtime.triggers import pick_eligible_trigger_ids
+from Project.runtime.triggers import explain_tick_pick_skip, pick_eligible_trigger_ids
 from Project.store.models import (
     ContextPushAccepted,
     ContextPushRejected,
@@ -31,6 +32,7 @@ from Project.store.state import StateStore
 
 app = FastAPI(title='MagicPin Engagement Bot')
 settings = Settings.from_env()
+log = logging.getLogger(__name__)
 store = StateStore()
 composer = Composer(GroqClient(settings.groq_api_key, settings.groq_model, settings.request_timeout_seconds))
 reply_engine = ReplyEngine()
@@ -79,20 +81,43 @@ async def push_context(body: ContextPushRequest):
 @app.post('/v1/tick', response_model=TickResponse)
 async def tick(body: TickRequest) -> TickResponse:
     selected = pick_eligible_trigger_ids(store, body.available_triggers, body.now, settings.max_actions_per_tick)
+    if settings.tick_debug:
+        selected_set = set(selected)
+        for tid in body.available_triggers:
+            if tid in selected_set:
+                continue
+            reason = explain_tick_pick_skip(store, tid)
+            if reason:
+                log.info('tick_pick_skip trigger_id=%s reason=%s', tid, reason)
+
     actions: list[TickAction] = []
+    reserved_suppression_keys: set[str] = set()
 
     for trigger_id in selected:
         trigger = store.get_context('trigger', trigger_id)
         if not trigger:
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=missing_trigger_payload', trigger_id)
             continue
         merchant_id = trigger.get('merchant_id')
         customer_id = trigger.get('customer_id')
         merchant = store.get_context('merchant', merchant_id) if merchant_id else None
         customer = store.get_context('customer', customer_id) if customer_id else None
         if not merchant:
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=missing_merchant_context', trigger_id)
             continue
         category = store.get_context('category', merchant.get('category_slug'))
         if not category:
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=missing_category_context', trigger_id)
+            continue
+        trigger_suppression_key = trigger.get('suppression_key')
+        if trigger_suppression_key and (
+            trigger_suppression_key in reserved_suppression_keys or store.is_suppressed(trigger_suppression_key)
+        ):
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=suppression_key_already_used_this_tick', trigger_id)
             continue
 
         composed = await composer.compose(category, merchant, trigger, customer)
@@ -102,10 +127,17 @@ async def tick(body: TickRequest) -> TickResponse:
 
         body_hash = hash_body(composed['body'])
         if body_hash in store.sent_body_hashes[merchant_id]:
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=duplicate_body_hash', trigger_id)
             continue
         store.sent_body_hashes[merchant_id].add(body_hash)
 
         suppression_key = composed['suppression_key']
+        if suppression_key in reserved_suppression_keys or store.is_suppressed(suppression_key):
+            if settings.tick_debug:
+                log.info('tick_compose_skip trigger_id=%s reason=composed_suppression_key_collision', trigger_id)
+            continue
+        reserved_suppression_keys.add(suppression_key)
         store.mark_suppression(suppression_key)
         store.mark_outbound_sent(merchant_id=merchant_id, customer_id=customer_id, now_iso=body.now)
         store.upsert_conversation(conversation_id, merchant_id=merchant_id, customer_id=customer_id)

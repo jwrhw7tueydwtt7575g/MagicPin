@@ -16,6 +16,7 @@ class Settings:
     groq_model: str = 'llama-3.1-70b-versatile'
     request_timeout_seconds: float = 20.0
     max_actions_per_tick: int = 20
+    tick_debug: bool = False
     team_name: str = 'MagicPin Team'
     team_members: list[str] = None
     contact_email: str = 'team@example.com'
@@ -30,6 +31,7 @@ class Settings:
             groq_model=os.getenv('GROQ_MODEL', 'llama-3.1-70b-versatile'),
             request_timeout_seconds=float(os.getenv('REQUEST_TIMEOUT_SECONDS', '20')),
             max_actions_per_tick=int(os.getenv('MAX_ACTIONS_PER_TICK', '20')),
+            tick_debug=os.getenv('TICK_DEBUG', '').lower() in ('1', 'true', 'yes'),
             team_name=os.getenv('TEAM_NAME', 'MagicPin Team'),
             team_members=[m.strip() for m in members if m.strip()],
             contact_email=os.getenv('CONTACT_EMAIL', 'team@example.com'),

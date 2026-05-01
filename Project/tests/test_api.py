@@ -101,3 +101,62 @@ def test_auto_reply_loop_ends_on_repeat():
         )
         assert response.status_code == 200
     assert response.json()['action'] == 'end'
+
+
+def test_tick_dedupes_same_suppression_key_within_batch():
+    now = '2026-01-01T00:00:00Z'
+    client.post('/v1/teardown')
+    client.post('/v1/context', json={'scope': 'category', 'context_id': 'dentists', 'version': 1, 'payload': {'slug': 'dentists'}, 'delivered_at': now})
+    client.post(
+        '/v1/context',
+        json={
+            'scope': 'merchant',
+            'context_id': 'm_dedupe',
+            'version': 1,
+            'payload': {'merchant_id': 'm_dedupe', 'category_slug': 'dentists', 'identity': {'name': 'M Dedupe', 'languages': ['en']}},
+            'delivered_at': now,
+        },
+    )
+    shared = 'shared_suppression_key'
+    client.post(
+        '/v1/context',
+        json={
+            'scope': 'trigger',
+            'context_id': 't_same_1',
+            'version': 1,
+            'payload': {
+                'id': 't_same_1',
+                'scope': 'merchant',
+                'kind': 'regulation_change',
+                'merchant_id': 'm_dedupe',
+                'customer_id': None,
+                'urgency': 5,
+                'suppression_key': shared,
+                'payload': {'top_item_id': 'd_one'},
+            },
+            'delivered_at': now,
+        },
+    )
+    client.post(
+        '/v1/context',
+        json={
+            'scope': 'trigger',
+            'context_id': 't_same_2',
+            'version': 1,
+            'payload': {
+                'id': 't_same_2',
+                'scope': 'merchant',
+                'kind': 'regulation_change',
+                'merchant_id': 'm_dedupe',
+                'customer_id': None,
+                'urgency': 5,
+                'suppression_key': shared,
+                'payload': {'top_item_id': 'd_two'},
+            },
+            'delivered_at': now,
+        },
+    )
+    tick = client.post('/v1/tick', json={'now': '2026-01-01T01:00:00Z', 'available_triggers': ['t_same_1', 't_same_2']})
+    assert tick.status_code == 200
+    actions = tick.json()['actions']
+    assert len(actions) == 1

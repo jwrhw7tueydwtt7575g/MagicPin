@@ -1,8 +1,37 @@
 from __future__ import annotations
 
+import re
+
 from Project.core.lang import pick_language_style
 from Project.core.prompts import build_prompt_metadata, build_system_prompt, build_user_prompt
 from Project.core.rules import derive_cta, derive_send_as, pick_template_name, sanitize_body
+
+# Patient-facing clinical reminders: binary without marketing-style STOP opt-out wording.
+_CLINICAL_CUSTOMER_RECALL_KINDS = frozenset(
+    {
+        'recall_due',
+        'appointment_reminder',
+        'appointment_tomorrow',
+        'chronic_refill_due',
+    }
+)
+
+_STOP_CTA_SENTENCE_RE = re.compile(
+    r'\s*reply\s+yes\b[^.?!]*(?:\bor\s*)?\bstop\b[^.?!]*[.?!]?',
+    re.IGNORECASE,
+)
+
+
+def strip_trailing_category_parenthetical(body: str, category_slug: str | None) -> str:
+    """Remove a trailing `` (<slug>)`` if present (LLM or legacy suffix leak)."""
+    slug = (category_slug or '').strip()
+    if not slug or not body:
+        return body
+    trimmed = body.rstrip()
+    tail = f' ({slug.lower()})'
+    if trimmed.lower().endswith(tail):
+        return trimmed[: -(len(slug) + 3)].rstrip()
+    return trimmed
 
 
 class Composer:
@@ -21,9 +50,9 @@ class Composer:
 
         fallback_body, fallback_rationale = self._rule_based_message(category, merchant, trigger, customer)
         body = sanitize_body(llm_output.get('body', ''), fallback_body)
-        body = self._align_body_with_cta(body, cta)
+        body = self._align_body_with_cta(body, cta, trigger, customer, category)
         rationale = llm_output.get('rationale', fallback_rationale)
-        body = self._enforce_category_specificity(body, category, merchant)
+        body = strip_trailing_category_parenthetical(body, category.get('slug'))
 
         return {
             'body': body,
@@ -54,7 +83,17 @@ class Composer:
         if customer:
             customer_name = customer.get('identity', {}).get('name', 'customer')
             body = f"Hi {customer_name}, this is {merchant_name}. Your {kind} update is due."
-            rationale = 'Customer-scoped trigger with explicit consent-safe YES/STOP action.'
+            rationale = 'Customer-scoped trigger with explicit consent-safe action.'
+            return body, rationale
+
+        if kind == 'competitor opened':
+            body = f"{merchant_name}: A new competitor has opened nearby. Let's update your Google profile to highlight your unique services."
+            rationale = 'Specific rule for competitor differentiation.'
+            return body, rationale
+
+        if kind == 'regulation change':
+            body = f"{merchant_name}: New industry regulations have been announced. We need to audit your current equipment for compliance."
+            rationale = 'Actionable compliance alert fallback.'
             return body, rationale
 
         if top_item_id:
@@ -62,7 +101,7 @@ class Composer:
                 f"{merchant_name}: new {category_slug} digest item {top_item_id} is relevant to your profile. "
                 "Want a 2-line takeaway you can use today?"
             )
-            rationale = 'Uses trigger digest anchor and category to drive curiosity with a single CTA.'
+            rationale = 'Uses trigger digest anchor.'
             return body, rationale
         if metric and delta_pct is not None:
             body = (
@@ -76,24 +115,36 @@ class Composer:
         rationale = 'Deterministic fallback grounded in merchant, category, and trigger kind.'
         return body, rationale
 
-    def _enforce_category_specificity(self, body: str, category: dict, merchant: dict) -> str:
-        category_slug = str(category.get('slug', '')).strip()
-        merchant_name = merchant.get('identity', {}).get('name')
-        if category_slug and category_slug.lower() not in body.lower():
-            body = f"{body} ({category_slug})"
-        if merchant_name and merchant_name.lower() not in body.lower():
-            body = f"{merchant_name}: {body}"
-        return body
 
-    def _align_body_with_cta(self, body: str, cta: str) -> str:
+    def _is_clinical_customer_recall(self, trigger: dict, customer: dict | None) -> bool:
+        if customer is None:
+            return False
+        kind = (trigger.get('kind') or '').lower()
+        return kind in _CLINICAL_CUSTOMER_RECALL_KINDS
+
+    def _align_body_with_cta(self, body: str, cta: str, trigger: dict, customer: dict | None, category: dict) -> str:
         txt = body.strip()
         if cta == 'yes_stop':
+            if self._is_clinical_customer_recall(trigger, customer):
+                txt = self._force_clinical_yes_no(txt)
+                return txt
             lower = txt.lower()
             if 'reply yes' not in lower and 'stop' not in lower:
                 txt = f'{txt} Reply YES to continue or STOP to opt out.'
             return txt
         if cta == 'none':
-            for fragment in ('Reply YES to continue or STOP to opt out.', 'Reply YES to act or STOP to pause.'):
+            for fragment in (
+                'Reply YES to continue or STOP to opt out.',
+                'Reply YES to act or STOP to pause.',
+                'Reply YES to book or STOP to cancel.',
+                'Reply YES to book, or NO if not this month.',
+            ):
                 txt = txt.replace(fragment, '').strip()
             return txt
         return txt
+
+    def _force_clinical_yes_no(self, body: str) -> str:
+        txt = _STOP_CTA_SENTENCE_RE.sub('', body).strip()
+        if txt and txt[-1] not in '.!?':
+            txt = f'{txt}.'
+        return f'{txt} Reply YES to book, or NO if not this month.'.strip()

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
+def explain_tick_pick_skip(store, trigger_id: str) -> str | None:
+    """Why a trigger id would not enter the scored tick list (before urgency cap).
 
-def _parse_iso(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    txt = ts.replace('Z', '+00:00')
-    return datetime.fromisoformat(txt)
+    ``available_triggers`` is treated as authoritative: expiry is not a skip reason here.
+    """
+    trigger = store.get_context('trigger', trigger_id)
+    if not trigger:
+        return 'missing_trigger_context'
+    suppression_key = trigger.get('suppression_key')
+    if suppression_key and store.is_suppressed(suppression_key):
+        return 'suppression_key_active'
+    return None
 
 
 def pick_eligible_trigger_ids(store, available_triggers: list[str], now: str, cap: int) -> list[str]:
-    now_dt = _parse_iso(now) or datetime.now(timezone.utc)
     scored: list[tuple[int, str]] = []
 
     for trigger_id in available_triggers:
@@ -20,9 +24,6 @@ def pick_eligible_trigger_ids(store, available_triggers: list[str], now: str, ca
             continue
         suppression_key = trigger.get('suppression_key')
         if suppression_key and store.is_suppressed(suppression_key):
-            continue
-        exp = _parse_iso(trigger.get('expires_at'))
-        if exp and exp < now_dt:
             continue
         urgency = int(trigger.get('urgency', 0))
         scored.append((urgency, trigger_id))

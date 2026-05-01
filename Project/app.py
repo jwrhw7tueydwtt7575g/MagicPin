@@ -187,7 +187,9 @@ async def reply(body: ReplyRequest):
         store.upsert_conversation(body.conversation_id, merchant_id=body.merchant_id, customer_id=body.customer_id)
 
     repeated_auto_count = store.repeated_incoming_text_count(body.conversation_id, body.message) + 1
-    decision = reply_engine.next_action(body.message, repeated_auto_count=repeated_auto_count)
+    convo = store.conversations.get(body.conversation_id)
+    turns = convo.turns if convo else []
+    decision = reply_engine.next_action(body.message, repeated_auto_count=repeated_auto_count, turns=turns)
     store.append_turn(
         body.conversation_id,
         {

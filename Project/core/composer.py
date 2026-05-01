@@ -86,12 +86,21 @@ class Composer:
             rationale = 'Customer-scoped trigger with explicit consent-safe action.'
             return body, rationale
 
-        if kind == 'competitor opened':
-            body = f"{merchant_name}: A new competitor has opened nearby. Let's update your Google profile to highlight your unique services."
-            rationale = 'Specific rule for competitor differentiation.'
-            return body, rationale
+        if 'ipl match' in kind:
+            match = payload.get('match', 'tonight\'s match')
+            venue = payload.get('venue', 'nearby')
+            time = payload.get('match_time_iso', 'tonight')
+            body = f"{merchant_name}: {match} at {venue} {time}. How about a match-night combo to drive covers? Want me to draft a quick banner?"
+            return body, 'IPL match-night trigger with payload details'
 
-        if kind == 'regulation change':
+        if 'competitor opened' in kind:
+            comp_name = payload.get('competitor_name', 'a new competitor')
+            distance = payload.get('distance_km', '?')
+            offer = payload.get('their_offer', 'discounts')
+            body = f"{merchant_name}: {comp_name} opened {distance}km away offering {offer}. We can update your profile to highlight your unique quality. Interested?"
+            return body, 'Competitor differentiation fallback'
+
+        if 'regulation change' in kind or 'compliance' in kind:
             body = f"{merchant_name}: New industry regulations have been announced. We need to audit your current equipment for compliance."
             rationale = 'Actionable compliance alert fallback.'
             return body, rationale

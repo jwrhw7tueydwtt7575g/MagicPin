@@ -24,7 +24,7 @@ class GroqClient:
         data = {
             'model': self.model,
             'temperature': 0,
-            'max_tokens': 220,
+            'max_tokens': 400,
             'response_format': {'type': 'json_object'},
             'messages': [
                 {'role': 'system', 'content': system_prompt},
@@ -42,7 +42,7 @@ class GroqClient:
                 fallback_data = {
                     'model': self.model,
                     'temperature': 0,
-                    'max_tokens': 220,
+                    'max_tokens': 400,
                     'messages': [
                         {'role': 'system', 'content': system_prompt},
                         {'role': 'user', 'content': user_prompt},

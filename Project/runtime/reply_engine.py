@@ -80,7 +80,7 @@ class ReplyEngine:
             return 'compliance_followup'
         return 'unclear'
 
-    def next_action(self, incoming: str, repeated_auto_count: int = 0) -> dict:
+    def next_action(self, incoming: str, repeated_auto_count: int = 0, turns: list[dict] = None) -> dict:
         label = self.classify(incoming)
         if label == 'auto' and repeated_auto_count >= 3:
             return {
@@ -99,11 +99,26 @@ class ReplyEngine:
                 'rationale': 'User opted out or declined; ending conversation respectfully.',
             }
         if label == 'positive':
+            # Attempt to pull context from the last bot message
+            last_bot_body = next(
+                (t['body'] for t in reversed(turns or []) if t.get('from') == 'bot'),
+                None
+            )
+            context = ''
+            if last_bot_body:
+                # Extract a likely subject (e.g. "audit", "promotion")
+                if 'audit' in last_bot_body.lower() or 'compliance' in last_bot_body.lower():
+                    context = ' audit and compliance check'
+                elif 'promo' in last_bot_body.lower() or 'offer' in last_bot_body.lower():
+                    context = ' promotion'
+                elif 'recall' in last_bot_body.lower() or 'appointment' in last_bot_body.lower():
+                    context = ' appointment booking'
+
             return {
                 'action': 'send',
-                'body': 'Perfect, I will proceed with this now and share the next update shortly.',
+                'body': f'Perfect, I will proceed with the{context} right away and share the next update shortly.',
                 'cta': 'open_ended',
-                'rationale': 'User intent is positive, so moving directly to action.',
+                'rationale': 'User intent is positive; response tailored to last bot turn context.',
             }
         if label == 'off_topic':
             return {

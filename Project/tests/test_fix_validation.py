@@ -29,6 +29,14 @@ def test_clinical_tone_no_stop():
     assert "Reply YES to book, or NO if not this month" in body
     assert cta == "yes_stop"
 
+def test_reply_engine_positive_context():
+    engine = ReplyEngine()
+    turns = [{"from": "bot", "body": "We should audit your equipment."}]
+    msg = "Yes please, let's do it."
+    decision = engine.next_action(msg, turns=turns)
+    assert decision["action"] == "send"
+    assert "audit and compliance check" in decision["body"]
+
 def test_reply_engine_audit_followup():
     engine = ReplyEngine()
     msg = "Got it doc — need help auditing my X-ray setup. We have an old D-speed film unit."

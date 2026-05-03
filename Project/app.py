@@ -189,7 +189,15 @@ async def reply(body: ReplyRequest):
     repeated_auto_count = store.repeated_incoming_text_count(body.conversation_id, body.message) + 1
     convo = store.conversations.get(body.conversation_id)
     turns = convo.turns if convo else []
-    decision = reply_engine.next_action(body.message, repeated_auto_count=repeated_auto_count, turns=turns)
+
+    # Branch on from_role so customer messages get customer-voiced replies
+    decision = reply_engine.next_action(
+        body.message,
+        repeated_auto_count=repeated_auto_count,
+        turns=turns,
+        from_role=body.from_role or 'merchant',
+    )
+
     store.append_turn(
         body.conversation_id,
         {
@@ -206,6 +214,29 @@ async def reply(body: ReplyRequest):
     if decision['action'] == 'wait':
         return ReplyWaitResponse(**decision)
 
+    # --- Handle slot_pick: compose customer-voiced slot confirmation via LLM ---
+    if decision['action'] == 'slot_pick':
+        merchant = store.get_context('merchant', body.merchant_id) or {}
+        customer = store.get_context('customer', body.customer_id) if body.customer_id else None
+
+        # Find the last trigger associated with this conversation for payload/slots
+        last_trigger_id = next(
+            (t.get('trigger_id') for t in reversed(turns) if t.get('trigger_id')),
+            None,
+        )
+        trigger = store.get_context('trigger', last_trigger_id) if last_trigger_id else {}
+        trigger_payload = trigger.get('payload', {}) if trigger else {}
+        trigger_kind = trigger.get('kind', 'appointment') if trigger else 'appointment'
+
+        slot_decision = await composer.compose_customer_reply(
+            merchant=merchant,
+            customer=customer or {},
+            incoming_message=body.message,
+            trigger_payload=trigger_payload,
+            trigger_kind=trigger_kind,
+        )
+        decision = slot_decision
+
     if store.is_duplicate_bot_body(body.conversation_id, decision['body']):
         return ReplyWaitResponse(
             action='wait',
@@ -219,10 +250,10 @@ async def reply(body: ReplyRequest):
             'ts': body.received_at,
             'from': 'bot',
             'body': decision['body'],
-            'cta': decision['cta'],
+            'cta': decision.get('cta', 'open_ended'),
         },
     )
-    return ReplySendResponse(**decision)
+    return ReplySendResponse(**{k: v for k, v in decision.items() if k != 'incoming'})
 
 
 @app.post('/v1/teardown', response_model=TeardownResponse)

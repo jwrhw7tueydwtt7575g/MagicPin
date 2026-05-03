@@ -66,6 +66,46 @@ class Composer:
             'prompt_variant': prompt_meta['prompt_variant'],
         }
 
+    async def compose_customer_reply(
+        self,
+        merchant: dict,
+        customer: dict,
+        incoming_message: str,
+        trigger_payload: dict,
+        trigger_kind: str,
+    ) -> dict:
+        """Compose a customer-voiced slot-confirmation reply from the merchant/bot."""
+        from Project.core.prompts import build_customer_reply_prompt, build_system_prompt
+        system_prompt = build_system_prompt('A')
+        user_prompt = build_customer_reply_prompt(
+            merchant=merchant,
+            customer=customer,
+            incoming=incoming_message,
+            trigger_payload=trigger_payload,
+            trigger_kind=trigger_kind,
+        )
+        llm_output = await self.groq_client.compose_json(system_prompt, user_prompt)
+
+        customer_name = customer.get('identity', {}).get('name', '') if customer else ''
+        merchant_name = merchant.get('identity', {}).get('name', 'the clinic')
+        slots = trigger_payload.get('available_slots', [])
+
+        # Fallback: match the slot they mentioned
+        fallback_body = self._slot_confirmation_fallback(
+            customer_name=customer_name,
+            merchant_name=merchant_name,
+            incoming=incoming_message,
+            slots=slots,
+        )
+        body = sanitize_body(llm_output.get('body', ''), fallback_body)
+        rationale = llm_output.get('rationale', 'Customer slot-pick confirmed with booking details.')
+        return {
+            'action': 'send',
+            'body': body,
+            'cta': 'open_ended',
+            'rationale': rationale,
+        }
+
     def _template_params(self, merchant: dict, trigger: dict) -> list[str]:
         name = merchant.get('identity', {}).get('name') or merchant.get('merchant_id', 'merchant')
         kind = trigger.get('kind', 'update')
@@ -157,3 +197,34 @@ class Composer:
         if txt and txt[-1] not in '.!?':
             txt = f'{txt}.'
         return f'{txt} Reply YES to book, or NO if not this month.'.strip()
+
+    def _slot_confirmation_fallback(
+        self,
+        customer_name: str,
+        merchant_name: str,
+        incoming: str,
+        slots: list[dict],
+    ) -> str:
+        """Match customer's message to a slot label, confirm it explicitly."""
+        incoming_lower = incoming.lower()
+        matched_slot = None
+        for slot in slots:
+            label = slot.get('label', '')
+            # Check if any part of the slot label appears in customer's message
+            parts = label.lower().split()
+            if any(p in incoming_lower for p in parts if len(p) > 2):
+                matched_slot = label
+                break
+
+        if matched_slot:
+            name_part = f'Hi {customer_name}, ' if customer_name else ''
+            return (
+                f'{name_part}your booking at {merchant_name} is confirmed for {matched_slot}. '
+                f'Please arrive 5 minutes early. See you then!'
+            )
+        # Generic fallback if no slot matched
+        name_part = f'Hi {customer_name}, ' if customer_name else ''
+        return (
+            f'{name_part}thank you for confirming! Your appointment at {merchant_name} has been noted. '
+            f'We will send you a reminder closer to the date.'
+        )

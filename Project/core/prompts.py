@@ -27,38 +27,100 @@ def build_system_prompt(variant: str) -> str:
     )
 
 
-def build_user_prompt(category: dict, merchant: dict, trigger: dict, customer: dict | None, language_style: str, cta: str) -> str:
-    variant = _pick_prompt_variant(merchant, trigger)
-    kind = (trigger.get('kind') or '').lower()
-    payload = trigger.get('payload', {})
+def _get_digest_item(payload: dict) -> dict | None:
+    """Look up digest item details from trigger payload."""
+    items = payload.get('items', [])
+    top_id = payload.get('top_item_id')
+    if top_id and items:
+        return next((i for i in items if i.get('id') == top_id), items[0] if items else None)
+    if items:
+        return items[0]
+    # Also try direct keys in payload
+    if payload.get('title') or payload.get('summary'):
+        return payload
+    return None
 
-    guidance = ""
+
+def _build_guidance(kind: str, payload: dict, customer: dict | None) -> str:
+    """Build rich, kind-specific guidance with real data from the payload."""
     if 'regulation' in kind or 'compliance' in kind:
-        guidance = "This is a compliance alert. Focus on the deadline and necessary audit actions."
+        deadline = payload.get('deadline') or payload.get('effective_date', 'the upcoming deadline')
+        summary = payload.get('regulation_summary') or payload.get('change_summary', '')
+        action = payload.get('required_action') or payload.get('audit_action', 'audit equipment and update SOPs')
+        return (
+            f"B2B_ALERT: This is a compliance message to a MERCHANT (business owner), NOT a consumer. "
+            f"The merchant must take action before {deadline}. "
+            f"Summary: {summary or 'new regulations announced'}. "
+            f"Required action: {action}. "
+            f"Use professional B2B language. Focus on deadline, audit steps, and what the merchant must do."
+        )
     elif 'competitor' in kind:
         comp_name = payload.get('competitor_name', 'a new competitor')
         distance = payload.get('distance_km', '?')
-        offer = payload.get('their_offer', 'unspecified offers')
-        guidance = (
-            f"Competitor Alert: {comp_name} opened {distance}km away offering {offer}. "
-            "Focus on the merchant's established trust and quality. Suggest highlighting these in GBP."
+        offer = payload.get('their_offer', 'discounts')
+        return (
+            f"B2B_ALERT to merchant: {comp_name} opened {distance}km away offering {offer}. "
+            f"Help the merchant differentiate — highlight established trust, quality, and GBP presence."
         )
     elif 'recall' in kind or 'appointment' in kind:
         slots = payload.get('available_slots', [])
         slot_labels = [s.get('label') for s in slots if s.get('label')]
         slot_str = ' or '.join(slot_labels) if slot_labels else 'upcoming slots'
-        guidance = (
-            f"Patient recall/reminder. Clinical tone only. "
-            f"Offer these specific slots: {slot_str}. "
-            f"NEVER use 'STOP to opt out' or 'STOP to ignore'. Binary: 'Reply YES to book, or NO if not this month'."
+        service = payload.get('service_due', 'check-up')
+        return (
+            f"PATIENT_RECALL: Clinical tone only. "
+            f"Service due: {service}. Specific slots available: {slot_str}. "
+            f"Show both slot options so patient can pick by replying 1 or 2. "
+            f"NEVER use 'STOP to opt out'. Binary: 'Reply YES to book, or NO if not this month'. "
+            f"Address patient by name."
         )
-    elif 'perf_' in kind:
-        guidance = f"Performance update: {payload.get('metric','metrics')} changed {payload.get('delta_pct','?')}%. Suggest concrete growth action."
+    elif 'research_digest' in kind:
+        item = _get_digest_item(payload)
+        if item:
+            title = item.get('title', '')
+            summary = item.get('summary', '')
+            source = item.get('source', '')
+            stat = item.get('key_stat', '')
+            return (
+                f"B2B research digest to merchant. Key finding: {title or summary}. "
+                f"{f'Key stat: {stat}. ' if stat else ''}"
+                f"{f'Source: {source}.' if source else ''} "
+                f"Help the merchant apply this insight to their practice."
+            )
+        return "B2B research digest. Share the top finding and how the merchant can apply it."
+    elif 'perf_dip' in kind or 'perf_spike' in kind:
+        metric = payload.get('metric', 'performance')
+        delta = payload.get('delta_pct')
+        delta_str = f'{delta:+.0%}' if delta is not None else 'significantly'
+        direction = 'dropped' if 'dip' in kind else 'spiked'
+        return (
+            f"B2B_ALERT to merchant: Your {metric} {direction} {delta_str}. "
+            f"Suggest one concrete, specific action to address this this week."
+        )
     elif 'ipl_match' in kind:
         match = payload.get('match', "tonight's match")
         venue = payload.get('venue', 'nearby')
         time = payload.get('match_time_iso', 'tonight')
-        guidance = f"IPL Match: {match} at {venue}, {time}. Suggest timely match-day promo or combo."
+        return (
+            f"B2B opportunity for merchant: IPL match — {match} at {venue}, {time}. "
+            f"Suggest a specific match-day promo or combo offer they can run today."
+        )
+    elif 'competitor_opened' in kind:
+        comp_name = payload.get('competitor_name', 'a competitor')
+        distance = payload.get('distance_km', '?')
+        offer = payload.get('their_offer', 'discounts')
+        return (
+            f"B2B_ALERT: {comp_name} opened {distance}km away offering {offer}. "
+            f"Help merchant differentiate with unique strengths and GBP optimization."
+        )
+    return "B2B engagement message to merchant. Be specific and actionable."
+
+
+def build_user_prompt(category: dict, merchant: dict, trigger: dict, customer: dict | None, language_style: str, cta: str) -> str:
+    kind = (trigger.get('kind') or '').lower()
+    payload = trigger.get('payload', {})
+
+    guidance = _build_guidance(kind, payload, customer)
 
     # --- Enriched merchant context ---
     identity = merchant.get('identity', {})
@@ -71,6 +133,7 @@ def build_user_prompt(category: dict, merchant: dict, trigger: dict, customer: d
     top_neg_theme = next((t for t in review_themes if t.get('sentiment') == 'neg'), None)
 
     summary = {
+        'context_type': 'B2B' if not customer else 'B2C_PATIENT_RECALL',
         'category': {
             'slug_hidden': True,
             'voice': category.get('voice', {}).get('tone'),
@@ -104,9 +167,10 @@ def build_user_prompt(category: dict, merchant: dict, trigger: dict, customer: d
         'cta_type': cta,
         'guidance': guidance,
         'instruction': (
-            'Use the merchant name, active_offers, signals, and review quotes in the body where relevant. '
-            'Be specific: mention clinic name, real offer prices, or lapsed patient numbers. '
-            'Keep body under 160 characters for WhatsApp readability.'
+            'IMPORTANT: context_type=B2B means you are writing TO a merchant (business owner), not a patient/consumer. '
+            'Use the merchant name, active_offers, signals, and real data in the body. '
+            'Be specific — mention real offer prices, lapsed patient counts, or performance numbers. '
+            'Do NOT add a character limit. Write as long as needed to be clear and actionable.'
         ),
     }
 

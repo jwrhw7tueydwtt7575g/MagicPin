@@ -65,6 +65,9 @@ _TIME_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bare slot number reply: customer replies "1" or "2" to pick a slot option
+_BARE_SLOT_NUMBER_RE = re.compile(r'^\s*[12]\s*$')
+
 
 class ReplyEngine:
     @staticmethod
@@ -80,12 +83,33 @@ class ReplyEngine:
     @staticmethod
     def _is_slot_pick(text: str) -> bool:
         """Customer is picking a specific booking slot."""
+        # Bare number reply: "1" or "2" to pick from slot options
+        if bool(_BARE_SLOT_NUMBER_RE.match(text)):
+            return True
         if bool(_SLOT_PICK_RE.search(text)):
             return True
         # Also catches "Wed 5 Nov, 6pm" pattern even without "book"
         if bool(_TIME_DATE_RE.search(text)) and any(w in text for w in ('book', 'please', 'yes', 'confirm', 'want', 'schedule')):
             return True
         return False
+
+    @staticmethod
+    def _infer_action_context(last_bot_body: str | None) -> str:
+        """Infer a natural action phrase from the last bot message — always grammatical."""
+        if not last_bot_body:
+            return 'this'
+        body = last_bot_body.lower()
+        if 'audit' in body or 'compliance' in body or 'regulation' in body:
+            return 'the audit and compliance check'
+        if 'promo' in body or 'offer' in body or 'combo' in body:
+            return 'the promotion'
+        if 'recall' in body or 'appointment' in body or 'booking' in body:
+            return 'the appointment booking'
+        if 'review' in body or 'profile' in body or 'gbp' in body:
+            return 'the profile update'
+        if 'research' in body or 'digest' in body:
+            return 'the research digest'
+        return 'this'
 
     def classify(self, incoming: str) -> str:
         text = incoming.strip().lower()
@@ -108,6 +132,7 @@ class ReplyEngine:
             return 'auto'
         if any(token in text for token in NEGATIVE_MARKERS) or _STOP_WORD_RE.search(text):
             return 'negative'
+        # slot_pick MUST be checked before positive to catch "yes book me for Wed..."
         if self._is_slot_pick(text):
             return 'slot_pick'
         if any(token in text for token in POSITIVE_MARKERS):
@@ -157,17 +182,10 @@ class ReplyEngine:
                 (t['body'] for t in reversed(turns or []) if t.get('from') == 'bot'),
                 None
             )
-            context = ''
-            if last_bot_body:
-                if 'audit' in last_bot_body.lower() or 'compliance' in last_bot_body.lower():
-                    context = ' audit and compliance check'
-                elif 'promo' in last_bot_body.lower() or 'offer' in last_bot_body.lower():
-                    context = ' promotion'
-                elif 'recall' in last_bot_body.lower() or 'appointment' in last_bot_body.lower():
-                    context = ' appointment booking'
+            action_context = self._infer_action_context(last_bot_body)
             return {
                 'action': 'send',
-                'body': f'Perfect, I will proceed with the{context} right away and share the next update shortly.',
+                'body': f'Perfect! I will proceed with {action_context} right away and share the next update shortly.',
                 'cta': 'open_ended',
                 'rationale': 'User intent is positive; response tailored to last bot turn context.',
             }

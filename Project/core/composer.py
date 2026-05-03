@@ -121,9 +121,23 @@ class Composer:
         delta_pct = payload.get('delta_pct')
 
         if customer:
-            customer_name = customer.get('identity', {}).get('name', 'customer')
-            body = f"Hi {customer_name}, this is {merchant_name}. Your {kind} update is due."
-            rationale = 'Customer-scoped trigger with explicit consent-safe action.'
+            customer_name = customer.get('identity', {}).get('name', 'there')
+            payload = trigger.get('payload', {})
+            slots = payload.get('available_slots', [])
+            slot_labels = [s.get('label') for s in slots if s.get('label')]
+            if slot_labels:
+                opts = '\n'.join(f'{i+1}. {label}' for i, label in enumerate(slot_labels[:2]))
+                body = (
+                    f"Hi {customer_name}, this is {merchant_name}. "
+                    f"Your {kind} is coming up. Please pick a time:\n{opts}\n"
+                    f"Reply 1 or 2 to confirm, or NO if this month doesn't work."
+                )
+            else:
+                body = (
+                    f"Hi {customer_name}, this is {merchant_name}. "
+                    f"Your {kind} is coming up. Reply YES to book, or NO if not this month."
+                )
+            rationale = 'Customer-scoped trigger with specific slot options and YES/NO CTA.'
             return body, rationale
 
         if 'ipl match' in kind:
@@ -196,6 +210,12 @@ class Composer:
         txt = _STOP_CTA_SENTENCE_RE.sub('', body).strip()
         if txt and txt[-1] not in '.!?':
             txt = f'{txt}.'
+        
+        # If the body already explicitly asks them to reply 1 or 2
+        lower_txt = txt.lower()
+        if 'reply 1 or 2' in lower_txt or 'reply yes to book, or no' in lower_txt:
+            return txt
+
         return f'{txt} Reply YES to book, or NO if not this month.'.strip()
 
     def _slot_confirmation_fallback(
@@ -206,24 +226,35 @@ class Composer:
         slots: list[dict],
     ) -> str:
         """Match customer's message to a slot label, confirm it explicitly."""
+        incoming_stripped = incoming.strip()
+        name_part = f'Hi {customer_name}, ' if customer_name else ''
+
+        # Handle bare number replies: "1" → first slot, "2" → second slot
+        if incoming_stripped in ('1', '2') and slots:
+            idx = int(incoming_stripped) - 1
+            if 0 <= idx < len(slots):
+                label = slots[idx].get('label', '')
+                return (
+                    f'{name_part}your booking at {merchant_name} is confirmed for {label}. '
+                    f'Please arrive 5 minutes early. See you then!'
+                )
+
+        # Keyword-match against slot labels
         incoming_lower = incoming.lower()
         matched_slot = None
         for slot in slots:
             label = slot.get('label', '')
-            # Check if any part of the slot label appears in customer's message
             parts = label.lower().split()
             if any(p in incoming_lower for p in parts if len(p) > 2):
                 matched_slot = label
                 break
 
         if matched_slot:
-            name_part = f'Hi {customer_name}, ' if customer_name else ''
             return (
                 f'{name_part}your booking at {merchant_name} is confirmed for {matched_slot}. '
                 f'Please arrive 5 minutes early. See you then!'
             )
-        # Generic fallback if no slot matched
-        name_part = f'Hi {customer_name}, ' if customer_name else ''
+        # Generic fallback
         return (
             f'{name_part}thank you for confirming! Your appointment at {merchant_name} has been noted. '
             f'We will send you a reminder closer to the date.'

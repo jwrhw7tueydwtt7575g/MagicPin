@@ -5,7 +5,7 @@ import asyncio
 from pathlib import Path
 
 DATA_ROOT = Path("Information/dataset/expanded")
-BASE_URL = "http://localhost:8080/v1"
+BASE_URL = "https://magicpin-bot-latest.onrender.com/v1"
 
 async def push_context(scope, context_id, payload):
     url = f"{BASE_URL}/context"
